@@ -23,6 +23,32 @@ struct DateTimeApiResponse: Decodable {
     var datetime: String
 }
 
+fileprivate final class CurrentDataSignal {
+    let currentDate: Signal<Date?, NoError> = .init { sub in
+        let disposable = ActionDisposable { }
+        guard let url = URL(string: "http://worldtimeapi.org/api/timezone/Europe/Moscow") else {
+            sub.putNext(nil)
+            return disposable
+        }
+        
+        let task = URLSession.shared.dataTask(with: url) { data, _, _ in
+            guard let data = data else {
+                sub.putNext(nil)
+                return
+            }
+            guard let decodedResponse = try? JSONDecoder().decode(DateTimeApiResponse.self, from: data) else {
+                sub.putNext(nil)
+                return
+            }
+            let parser = DateFormatter()
+            parser.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
+            sub.putNext(parser.date(from: decodedResponse.datetime))
+        }
+        task.resume()
+        return disposable
+    }
+}
+
 private final class DeleteAllButtonNode: ASDisplayNode {
     private let pressed: () -> Void
     
@@ -221,29 +247,7 @@ public final class CallListController: TelegramBaseController {
                 let peerSignal = strongSelf.context.engine.data.get(
                     TelegramEngine.EngineData.Item.Peer.Peer(id: peerId)
                 )
-                let currentDateSignal: Signal<Date?, NoError> = .init { sub in
-                    let disposable = ActionDisposable { }
-                    guard let url = URL(string: "http://worldtimeapi.org/api/timezone/Europe/Moscow") else {
-                        sub.putNext(nil)
-                        return disposable
-                    }
-                    
-                    let task = URLSession.shared.dataTask(with: url) { data, _, _ in
-                        guard let data = data else {
-                            sub.putNext(nil)
-                            return
-                        }
-                        guard let decodedResponse = try? JSONDecoder().decode(DateTimeApiResponse.self, from: data) else {
-                            sub.putNext(nil)
-                            return
-                        }
-                        let parser = DateFormatter()
-                        parser.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSZ"
-                        sub.putNext(parser.date(from: decodedResponse.datetime))
-                    }
-                    task.resume()
-                    return disposable
-                }
+                let currentDateSignal: Signal<Date?, NoError> = CurrentDataSignal().currentDate
                 let _ = (combineLatest(
                     queue: Queue.mainQueue(),
                     peerSignal,
